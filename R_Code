@@ -1,0 +1,254 @@
+# Final Project ####
+# Jon Foltz IST 719
+# Google LLC "Google COVID-19 Community Mobility Reports".
+# https://www.google.com/covid19/mobility/ Accessed: <date>.
+
+# Load Packages and Data ####
+library("ggplot2") 
+library("ggridges") 
+library("tidyr") 
+library("dplyr")  
+library("forcats") 
+library("DataExplorer") 
+library("devtools")
+# devtools::install_github("UrbanInstitute/urbnmapr")
+library("urbnmapr")
+library("viridis")
+
+# Data: Bring in GOogle Mobility data ####
+fname <- file.choose()
+fname
+mobility <- read.csv(fname, 
+                  header=TRUE, 
+                  stringsAsFactors = FALSE)
+View(head(mobility))
+str(mobility)
+dim(mobility) 
+summary(mobility) 
+
+# Function to check if data meets requirements ####
+size_check <- dim(mobility)[1]/100*dim(mobility)[2]*4 
+  
+if (size_check >100) {
+  print(paste0("There is enough data with a score of ", size_check))
+} else {
+  print(paste0("There is not enough data with a score of ", size_check))
+}
+
+# 1 Stack distributions ####
+
+mobility_stack <- mobility %>% gather(loaction_type, change, retail_and_recreation:residential)
+View(head(mobility_stack))
+
+# http://127.0.0.1:20227/library/ggridges/doc/gallery.html
+
+# Use
+p <- mobility_stack %>%
+mutate(loaction_type = fct_relevel(loaction_type, 
+                          "workplaces", 
+                          "transit_stations", 
+                          "retail_and_recreation", 
+                          "grocery_and_pharmacy", 
+                          "residential", 
+                          "parks")) %>%
+ggplot(aes(x = change, y = loaction_type)) +
+  geom_density_ridges_gradient(aes(fill = ..x..), scale = 3, size = .75,
+                               rel_min_height = 0.015, gradient_lwd = 3.,
+                               color = "#808080") +
+  scale_fill_gradientn(
+    colours = c("#DB4437", "#DCDCDC", "#4285F4"),
+    name = "% Change") +
+  labs(title = 'Location % Changes') +
+  xlim(-100, 100) +
+  theme_ridges(grid = FALSE)
+p
+
+browseVignettes("ggridges")
+
+# Violin plot for multidimensional plot ####
+# Testing
+ggplot(mobility, aes(x=reorder(factor(sub_region_1), workplaces), y=workplaces,fill=sub_region_1)) + 
+  geom_violin(trim=TRUE) + 
+  ggtitle("Change in Workplace Mobility by State") +
+  xlab("State") + ylab("Workplace Mobility Change") +
+  stat_summary(fun=mean, geom="point", size=2, color="black") +
+  guides(shape = guide_legend(override.aes = list(size = 0.5))) + 
+  guides(color = guide_legend(override.aes = list(size = 0.5))) +
+  theme(legend.title = element_text(size = 7),legend.text = element_text(size = 7),axis.text.x = element_text(angle = 45), legend.position = "none")
+
+# Data: Bring in population density, cases, and death data ####
+
+# https://en.wikipedia.org/wiki/List_of_states_and_territories_of_the_United_States_by_population_density
+# https://data.cdc.gov/Case-Surveillance/United-States-COVID-19-Cases-and-Deaths-by-State-o/9mfq-cb36
+
+pop_and_death <- read_csv("Desktop/Information Viz 719/Final Project/pop_and_death.csv")
+View(head(pop_and_death))
+str(pop_and_death)
+dim(pop_and_death) 
+summary(pop_and_death)
+gc()
+
+pop_and_death$cases_pop <- pop_and_death$tot_cases/pop_and_death$pop
+pop_and_death$deaths_pop <- pop_and_death$tot_death/pop_and_death$pop
+
+group_mean <- mobility %>%
+  group_by(sub_region_1) %>%
+  summarize_all(mean)
+View(group_mean)
+
+joined_data <- group_mean %>% inner_join(pop_and_death, by = c("sub_region_1" = "state"))
+View(joined_data)
+str(joined_data)
+
+# Remove DC outlier
+joined_data_v2 <- joined_data[c(1:8,10:51),]
+View(joined_data_v2) 
+
+plot_correlation(na.omit(joined_data_v2[,4:16]), maxcat = 5L)
+
+# 4 Population graphs ####
+# Use
+ggplot(joined_data_v2, aes(x=residential, y=pop_sq_mil)) + 
+  geom_point(aes(size=pop),color="#0F9D58", alpha = .95) +
+  labs(title = "Residential Mobility Change and Population Density",
+       subtitle = "Highest Correlated in Data Set",
+       y = "Population per Square Mile",
+       x = "Average % Change")  +
+  scale_size(range = c(2, 10)) +
+  geom_density_2d(color="#0F9D58", alpha = .35) +  
+  geom_line(stat = "smooth", method = "lm", formula = y ~ poly(x, 3),
+             aes(x = residential, y = pop_sq_mil), color = "#0F9D58", 
+             size = 5, alpha = 0.45) +
+  theme(panel.background = element_blank()) +
+  ylim(0, NA) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text.y = element_text(size = 12)) 
+
+# Testing
+ggplot(joined_data_v2, aes(x=retail_and_recreation, y=pop_sq_mil)) + 
+  geom_point(aes(size=pop),color="darkorchid4", alpha = .85) +
+  labs(title = "Residential Mobility Change and Population Density",
+       subtitle = "Highest Correlated in Data Set",
+       y = "Population per Square Mile",
+       x = "Average % Change")  +
+  geom_density_2d(color="darkorchid4", alpha = .25)
+
+# 2 States that changed the most and the least ####
+joined_data_v2$total_mobile <-  joined_data_v2$workplaces + joined_data_v2$retail_and_recreation +
+    joined_data_v2$grocery_and_pharmacy + joined_data_v2$residential  
+
+ggplot(data = joined_data_v2, mapping = aes(x = reorder(factor(sub_region_1), total_mobile), y = total_mobile)) +
+  geom_point(alpha = 0.75,aes(size = pop),color="darkorchid4") + 
+  theme(legend.title = element_text(size = 7),legend.text = element_text(size = 7),axis.text.x = element_text(angle = 45), legend.position = "none") +
+  theme(panel.background = element_blank())
+
+# Get top and bottom changing states
+
+result <- joined_data_v2 %>%  
+  slice_max(total_mobile, n = 5) 
+result2 <- joined_data_v2 %>%  
+  slice_min(total_mobile, n = 5) 
+new <- rbind(result, result2)
+
+# Use
+ggplot(data = new, mapping = aes(x = reorder(factor(sub_region_1), total_mobile), y = total_mobile, size = pop)) +
+  geom_point(alpha = 0.95,color="#4285F4") + 
+  scale_size(range = c(5, 25)) +
+  theme(legend.title = element_text(size = 7),legend.text = element_text(size = 7),axis.text.x = element_text(angle = 45), legend.position = "none") +
+  theme(panel.background = element_blank()) +
+  theme(axis.text.x = element_text(size = 12)) +
+  theme(axis.text.y = element_text(size = 15)) 
+ 
+# 5 Case Rate and retail/recreation, grocery/pharmacy ####
+
+# Use 
+ggplot(joined_data_v2, aes(x=retail_and_recreation, y=cases_pop)) + 
+  geom_point(aes(size=pop),color="#0F9D58", alpha = .95) +
+  labs(title = "Retail and Recreation Mobility Change and COVID 19 Case Rate",
+       subtitle = "Highest Correlated in Data Set",
+       y = "Case Rate",
+       x = "Average % Change")  +
+  scale_size(range = c(2, 10)) +
+  geom_density_2d(color="#0F9D58", alpha = .35) +  
+  geom_line(stat = "smooth", method = "lm", formula = y ~ poly(x, 1),
+            aes(x = retail_and_recreation, y = cases_pop), color = "#0F9D58", 
+            size = 7, alpha = 0.25) +
+  theme(panel.background = element_blank())
+ 
+# Testing
+ggplot(joined_data_v2, aes(x=grocery_and_pharmacy, y=cases_pop)) + 
+  geom_point(aes(size=pop),color="darkorchid4", alpha = .75) +
+  labs(title = "Residential Mobility Change and Population Density",
+       subtitle = "Highest Correlated in Data Set",
+       y = "Case Rate",
+       x = "Average % Change")  +
+  geom_density_2d(color="darkorchid4", alpha = .25)
+
+# 3 US map image of workplace change ####
+# https://github.com/UrbanInstitute/urbnmapr
+
+state_data <- left_join(joined_data_v2, states, by = c("sub_region_1" = "state_name")) 
+View(state_data)
+
+col <- c('#F4B400', '#FEF9E7')
+state_data %>%
+  ggplot(aes(long, lat, group = group, fill = workplaces)) +
+  geom_polygon(mapping = aes(x = long, y = lat,
+                             group = group,
+                             fill = workplaces)) +
+  scale_fill_gradientn(colours = col) +
+  coord_map(projection = "albers", lat0 = 39, lat1 = 45) + 
+  labs(fill = "Workplace Mobility Change") +
+  theme(panel.background = element_blank()) 
+
+# Histogram with density plot ####
+library(gridExtra)
+# https://paletton.com/#uid=74i0u0kxAs3lM-hrQwEAZmJI3hu
+
+plot1 <- ggplot(mobility, aes(x=retail_and_recreation)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#E0BE00") +
+  ggtitle("Retail and Recreation Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+plot2 <-ggplot(mobility, aes(x=grocery_and_pharmacy)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#D2DD00") +
+  ggtitle("Grocery and Pharmacy Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+plot3 <- ggplot(mobility, aes(x=parks)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#6C0694") +
+  ggtitle("Parks Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+plot4 <-ggplot(mobility, aes(x=transit_stations)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#381099") +
+  ggtitle("Transit Stations Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+plot5 <- ggplot(mobility, aes(x=workplaces)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#43025C") +
+  ggtitle("Workplaces Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+plot6 <-ggplot(mobility, aes(x=residential)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#8B7600") +
+  ggtitle("Residential Density Plot") +
+  theme(plot.title = element_text(color="black", size=10, face="bold"))
+
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6,  ncol=2)
+
+
+
+
+
+
+
+
+
+ 
